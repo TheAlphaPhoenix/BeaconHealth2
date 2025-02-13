@@ -8,17 +8,378 @@ def init_db():
     conn = sqlite3.connect('beacon_health.db')
     c = conn.cursor()
     
-    # Users table
+    # Apps table
     c.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            email TEXT PRIMARY KEY,
-            password TEXT NOT NULL,
-            role TEXT NOT NULL,
-            first_name TEXT,
-            last_name TEXT,
+        CREATE TABLE IF NOT EXISTS apps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            category TEXT NOT NULL,
+            description TEXT,
+            developer TEXT,
+            clinical_score FLOAT,
+            fda_status TEXT,
+            price_model TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    
+    # Messages table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender_role TEXT NOT NULL,
+            recipient_role TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            message TEXT NOT NULL,
+            app_name TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Prescriptions table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prescriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            app_name TEXT NOT NULL,
+            prescribed_by TEXT NOT NULL,
+            prescribed_to TEXT NOT NULL,
+            status TEXT NOT NULL,
+            prescribed_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Insert demo apps if none exist
+    c.execute('SELECT COUNT(*) FROM apps')
+    if c.fetchone()[0] == 0:
+        demo_apps = [
+            ('MindfulPath', 'Mental Health', 'AI-powered CBT therapy platform with personalized interventions', 
+             'NeuroTech', 4.8, 'FDA Cleared', 'Subscription'),
+            ('DiabetesGuard', 'Chronic Disease', 'Comprehensive diabetes management with CGM integration', 
+             'HealthTech', 4.9, 'FDA Cleared', 'Insurance'),
+            ('SleepHarmony', 'Sleep', 'Advanced sleep therapy using cognitive behavioral techniques', 
+             'DreamTech', 4.7, 'FDA Registered', 'Freemium'),
+            ('PainPal', 'Pain Management', 'VR-based chronic pain management with biofeedback', 
+             'ChronicCare', 4.6, 'FDA Cleared', 'Insurance'),
+            ('CardioCoach', 'Heart Health', 'AI-driven cardiac rehabilitation platform', 
+             'HeartTech', 4.9, 'FDA Cleared', 'Prescription'),
+            ('AnxietyEase', 'Mental Health', 'Personalized anxiety management with real-time monitoring', 
+             'MindTech', 4.7, 'FDA Registered', 'Subscription')
+        ]
+        c.executemany('''
+            INSERT INTO apps (name, category, description, developer, clinical_score, fda_status, price_model)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', demo_apps)
+        
+        # Insert demo prescriptions
+        demo_prescriptions = [
+            ('DiabetesGuard', 'Dr. Smith', 'Demo Patient', 'Active'),
+            ('MindfulPath', 'Dr. Johnson', 'Demo Patient', 'Active'),
+            ('SleepHarmony', 'Dr. Smith', 'Demo Patient', 'Pending')
+        ]
+        c.executemany('''
+            INSERT INTO prescriptions (app_name, prescribed_by, prescribed_to, status)
+            VALUES (?, ?, ?, ?)
+        ''', demo_prescriptions)
+        
+        # Insert demo messages
+        demo_messages = [
+            ('provider', 'patient', 'DiabetesGuard Progress', 'How are you finding the glucose tracking features?', 'DiabetesGuard'),
+            ('patient', 'provider', 'Question about MindfulPath', 'When is the best time to use the meditation exercises?', 'MindfulPath'),
+            ('provider', 'patient', 'SleepHarmony Prescription', 'I've prescribed SleepHarmony to help with your sleep patterns.', 'SleepHarmony')
+        ]
+        c.executemany('''
+            INSERT INTO messages (sender_role, recipient_role, subject, message, app_name)
+            VALUES (?, ?, ?, ?, ?)
+        ''', demo_messages)
+    
+    conn.commit()
+    conn.close()
+
+def main():
+    st.set_page_config(page_title="Beacon Health", layout="wide")
+    init_db()
+    
+    # Role selection in sidebar
+    with st.sidebar:
+        st.title("Beacon Health")
+        role = st.selectbox("Select Role", ["Patient", "Provider", "Admin"])
+        st.info("Demo Mode: Roles can be switched freely")
+    
+    # Display appropriate dashboard based on role
+    if role == "Patient":
+        show_patient_experience()
+    elif role == "Provider":
+        show_provider_experience()
+    else:
+        show_admin_experience()
+
+def show_patient_experience():
+    st.title("Patient Portal")
+    tabs = st.tabs(["My Apps", "Browse Apps", "Messages", "Progress"])
+    
+    with tabs[0]:
+        show_patient_apps()
+    
+    with tabs[1]:
+        show_app_directory(for_patient=True)
+    
+    with tabs[2]:
+        show_messages("patient")
+    
+    with tabs[3]:
+        show_patient_progress()
+
+def show_provider_experience():
+    st.title("Provider Portal")
+    tabs = st.tabs(["Patient Management", "Prescribe Apps", "Messages", "Analytics"])
+    
+    with tabs[0]:
+        show_provider_patients()
+    
+    with tabs[1]:
+        show_app_directory(for_patient=False)
+    
+    with tabs[2]:
+        show_messages("provider")
+    
+    with tabs[3]:
+        show_provider_analytics()
+
+def show_patient_apps():
+    st.header("My Digital Therapeutics")
+    
+    # Prescribed Apps
+    st.subheader("Prescribed Apps")
+    conn = sqlite3.connect('beacon_health.db')
+    prescriptions = pd.read_sql('''
+        SELECT p.*, a.description, a.clinical_score, a.fda_status 
+        FROM prescriptions p 
+        JOIN apps a ON p.app_name = a.name 
+        WHERE prescribed_to = 'Demo Patient'
+    ''', conn)
+    conn.close()
+    
+    for _, app in prescriptions.iterrows():
+        with st.expander(f"{app['app_name']} - Prescribed by {app['prescribed_by']}"):
+            col1, col2 = st.columns([2,1])
+            with col1:
+                st.write(f"**Description:** {app['description']}")
+                st.write(f"**Status:** {app['status']}")
+                st.write(f"**Clinical Score:** {app['clinical_score']}/5.0")
+                st.write(f"**FDA Status:** {app['fda_status']}")
+            with col2:
+                st.button("Launch App", key=f"launch_{app['id']}")
+                st.button("Message Provider", key=f"msg_{app['id']}")
+
+def show_app_directory(for_patient=True):
+    st.header("Digital Therapeutics Directory")
+    
+    # Filters
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        category = st.selectbox("Category", [
+            "All",
+            "Mental Health",
+            "Chronic Disease",
+            "Sleep",
+            "Pain Management",
+            "Heart Health"
+        ])
+    with col2:
+        fda_status = st.selectbox("FDA Status", [
+            "All",
+            "FDA Cleared",
+            "FDA Registered"
+        ])
+    with col3:
+        price_model = st.selectbox("Price Model", [
+            "All",
+            "Free",
+            "Subscription",
+            "Insurance",
+            "Prescription"
+        ])
+    
+    # Display apps
+    conn = sqlite3.connect('beacon_health.db')
+    apps = pd.read_sql('SELECT * FROM apps', conn)
+    conn.close()
+    
+    for _, app in apps.iterrows():
+        with st.expander(f"{app['name']} - {app['category']}"):
+            col1, col2 = st.columns([2,1])
+            with col1:
+                st.write(f"**Developer:** {app['developer']}")
+                st.write(f"**Description:** {app['description']}")
+                st.write(f"**Clinical Score:** {app['clinical_score']}/5.0")
+                st.write(f"**FDA Status:** {app['fda_status']}")
+                st.write(f"**Price Model:** {app['price_model']}")
+            with col2:
+                if for_patient:
+                    if st.button("Request Access", key=f"request_{app['id']}"):
+                        st.success("Request sent to your healthcare provider")
+                else:
+                    if st.button("Prescribe", key=f"prescribe_{app['id']}"):
+                        st.success(f"Prescribed {app['name']}")
+
+def show_messages(role):
+    st.header("Message Center")
+    
+    # New Message Form
+    with st.expander("New Message"):
+        with st.form("new_message"):
+            subject = st.text_input("Subject")
+            message = st.text_area("Message")
+            app = st.selectbox("Related App", ["None"] + list(pd.read_sql(
+                'SELECT name FROM apps', sqlite3.connect('beacon_health.db')
+            )['name']))
+            
+            if st.form_submit_button("Send Message"):
+                conn = sqlite3.connect('beacon_health.db')
+                c = conn.cursor()
+                c.execute('''
+                    INSERT INTO messages (sender_role, recipient_role, subject, message, app_name)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (role, 'provider' if role == 'patient' else 'patient', subject, message, app))
+                conn.commit()
+                conn.close()
+                st.success("Message sent!")
+    
+    # Message History
+    st.subheader("Message History")
+    conn = sqlite3.connect('beacon_health.db')
+    messages = pd.read_sql(
+        f"SELECT * FROM messages WHERE sender_role = ? OR recipient_role = ? ORDER BY created_at DESC",
+        conn,
+        params=(role, role)
+    )
+    conn.close()
+    
+    for _, msg in messages.iterrows():
+        with st.expander(f"{msg['subject']} - {msg['created_at']}"):
+            st.write(f"**From:** {msg['sender_role'].capitalize()}")
+            st.write(f"**To:** {msg['recipient_role'].capitalize()}")
+            if msg['app_name'] != 'None':
+                st.write(f"**Related App:** {msg['app_name']}")
+            st.write(f"**Message:** {msg['message']}")
+            
+            # Reply button
+            if st.button("Reply", key=f"reply_{msg['id']}"):
+                st.session_state.replying_to = msg['id']
+
+def show_patient_progress():
+    st.header("My Progress")
+    
+    # Demo progress data
+    progress_data = pd.DataFrame({
+        'Week': ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+        'Engagement': [85, 92, 88, 95],
+        'Wellness Score': [75, 80, 85, 88]
+    })
+    
+    st.line_chart(progress_data.set_index('Week'))
+    
+    # Progress notes
+    st.subheader("Progress Notes")
+    with st.expander("Week 4 Summary"):
+        st.write("""
+        - Completed all recommended meditation sessions
+        - Sleep quality improved by 25%
+        - Stress levels decreased
+        - Medication adherence at 95%
+        """)
+
+def show_provider_patients():
+    st.header("Patient Management")
+    
+    # Demo patient list
+    patients = pd.DataFrame({
+        'Name': ['John Smith', 'Sarah Johnson', 'Michael Chen'],
+        'Active Apps': [2, 1, 3],
+        'Engagement': ['High', 'Medium', 'High'],
+        'Last Check-in': ['2 days ago', '1 week ago', '3 days ago']
+    })
+    
+    for _, patient in patients.iterrows():
+        with st.expander(f"{patient['Name']}"):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write(f"**Active Apps:** {patient['Active Apps']}")
+                st.write(f"**Engagement:** {patient['Engagement']}")
+                st.write(f"**Last Check-in:** {patient['Last Check-in']}")
+            with col2:
+                st.button("View Details", key=f"details_{patient['Name']}")
+                st.button("Send Message", key=f"message_{patient['Name']}")
+                st.button("Prescribe App", key=f"prescribe_to_{patient['Name']}")
+
+def show_provider_analytics():
+    st.header("Provider Analytics")
+    
+    # Demo metrics
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Active Patients", "15")
+        st.metric("Total Prescriptions", "28")
+    with col2:
+        st.metric("Avg. Engagement", "87%")
+        st.metric("Patient Messages", "12")
+    with col3:
+        st.metric("Positive Outcomes", "92%")
+        st.metric("Pending Reviews", "3")
+
+def show_admin_experience():
+    st.title("Admin Portal")
+    tabs = st.tabs(["App Management", "User Management", "System Analytics"])
+    
+    with tabs[0]:
+        show_app_management()
+    
+    with tabs[1]:
+        show_user_management()
+    
+    with tabs[2]:
+        show_system_analytics()
+
+def show_app_management():
+    st.header("Digital Therapeutics Management")
+    
+    # Add new app form
+    with st.form("add_app"):
+        st.subheader("Add New App")
+        name = st.text_input("App Name")
+        category = st.selectbox("Category", [
+            "Mental Health",
+            "Chronic Disease",
+            "Sleep",
+            "Pain Management",
+            "Heart Health"
+        ])
+        description = st.text_area("Description")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            clinical_score = st.slider("Clinical Score", 0.0, 5.0, 4.0)
+            fda_status = st.selectbox("FDA Status", ["FDA Cleared", "FDA Registered"])
+        with col2:
+            developer = st.text_input("Developer")
+            price_model = st.selectbox("Price Model", ["Free", "Subscription", "Insurance", "Prescription"])
+        
+        if st.form_submit_button("Add App"):
+            conn = sqlite3.connect('beacon_health.db')
+            c = conn.cursor()
+            c.execute('''
+                INSERT INTO apps (name, category, description, developer, clinical_score, fda_status, price_model)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (name, category,
+        import streamlit as st
+import pandas as pd
+from datetime import datetime
+import sqlite3
+
+def init_db():
+    """Initialize SQLite database with required tables"""
+    conn = sqlite3.connect('beacon_health.db')
+    c = conn.cursor()
     
     # Apps table
     c.execute('''
@@ -35,18 +396,74 @@ def init_db():
         )
     ''')
     
+    # Messages table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender_role TEXT NOT NULL,
+            recipient_role TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            message TEXT NOT NULL,
+            app_name TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Prescriptions table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS prescriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            app_name TEXT NOT NULL,
+            prescribed_by TEXT NOT NULL,
+            prescribed_to TEXT NOT NULL,
+            status TEXT NOT NULL,
+            prescribed_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
     # Insert demo apps if none exist
     c.execute('SELECT COUNT(*) FROM apps')
     if c.fetchone()[0] == 0:
         demo_apps = [
-            ('MindfulPath', 'Mental Health', 'AI-powered CBT therapy platform', 'NeuroTech', 4.8, 'FDA Cleared', 'Subscription'),
-            ('DiabetesGuard', 'Chronic Disease', 'Diabetes management with CGM integration', 'HealthTech', 4.9, 'FDA Cleared', 'Insurance'),
-            ('SleepHarmony', 'Sleep', 'Advanced sleep therapy using CBT', 'DreamTech', 4.7, 'FDA Registered', 'Freemium')
+            ('MindfulPath', 'Mental Health', 'AI-powered CBT therapy platform with personalized interventions', 
+             'NeuroTech', 4.8, 'FDA Cleared', 'Subscription'),
+            ('DiabetesGuard', 'Chronic Disease', 'Comprehensive diabetes management with CGM integration', 
+             'HealthTech', 4.9, 'FDA Cleared', 'Insurance'),
+            ('SleepHarmony', 'Sleep', 'Advanced sleep therapy using cognitive behavioral techniques', 
+             'DreamTech', 4.7, 'FDA Registered', 'Freemium'),
+            ('PainPal', 'Pain Management', 'VR-based chronic pain management with biofeedback', 
+             'ChronicCare', 4.6, 'FDA Cleared', 'Insurance'),
+            ('CardioCoach', 'Heart Health', 'AI-driven cardiac rehabilitation platform', 
+             'HeartTech', 4.9, 'FDA Cleared', 'Prescription'),
+            ('AnxietyEase', 'Mental Health', 'Personalized anxiety management with real-time monitoring', 
+             'MindTech', 4.7, 'FDA Registered', 'Subscription')
         ]
         c.executemany('''
             INSERT INTO apps (name, category, description, developer, clinical_score, fda_status, price_model)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', demo_apps)
+        
+        # Insert demo prescriptions
+        demo_prescriptions = [
+            ('DiabetesGuard', 'Dr. Smith', 'Demo Patient', 'Active'),
+            ('MindfulPath', 'Dr. Johnson', 'Demo Patient', 'Active'),
+            ('SleepHarmony', 'Dr. Smith', 'Demo Patient', 'Pending')
+        ]
+        c.executemany('''
+            INSERT INTO prescriptions (app_name, prescribed_by, prescribed_to, status)
+            VALUES (?, ?, ?, ?)
+        ''', demo_prescriptions)
+        
+        # Insert demo messages
+        demo_messages = [
+            ('provider', 'patient', 'DiabetesGuard Progress', 'How are you finding the glucose tracking features?', 'DiabetesGuard'),
+            ('patient', 'provider', 'Question about MindfulPath', 'When is the best time to use the meditation exercises?', 'MindfulPath'),
+            ('provider', 'patient', 'SleepHarmony Prescription', 'I've prescribed SleepHarmony to help with your sleep patterns.', 'SleepHarmony')
+        ]
+        c.executemany('''
+            INSERT INTO messages (sender_role, recipient_role, subject, message, app_name)
+            VALUES (?, ?, ?, ?, ?)
+        ''', demo_messages)
     
     conn.commit()
     conn.close()
@@ -55,230 +472,347 @@ def main():
     st.set_page_config(page_title="Beacon Health", layout="wide")
     init_db()
     
-    # Session state initialization
-    if 'logged_in' not in st.session_state:
-        st.session_state.logged_in = False
-    if 'user_role' not in st.session_state:
-        st.session_state.user_role = None
-    
-    # Sidebar
+    # Role selection in sidebar
     with st.sidebar:
-        if st.session_state.logged_in:
-            st.write(f"Role: {st.session_state.user_role}")
-            if st.button("Logout"):
-                st.session_state.logged_in = False
-                st.session_state.user_role = None
-                st.rerun()
+        st.title("Beacon Health")
+        role = st.selectbox("Select Role", ["Patient", "Provider", "Admin"])
+        st.info("Demo Mode: Roles can be switched freely")
     
-    # Main content
-    if not st.session_state.logged_in:
-        show_login()
+    # Display appropriate dashboard based on role
+    if role == "Patient":
+        show_patient_experience()
+    elif role == "Provider":
+        show_provider_experience()
     else:
-        if st.session_state.user_role == 'admin':
-            show_admin_dashboard()
-        elif st.session_state.user_role == 'provider':
-            show_provider_dashboard()
-        else:
-            show_patient_dashboard()
+        show_admin_experience()
 
-def show_login():
-    st.title("Beacon Health")
-    
-    tab1, tab2 = st.tabs(["Login", "Register"])
-    
-    with tab1:
-        with st.form("login_form"):
-            email = st.text_input("Email")
-            password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Login")
-            
-            if submitted:
-                # Demo login - in production, verify against database
-                st.session_state.logged_in = True
-                st.session_state.user_role = 'provider'  # Demo role
-                st.rerun()
-    
-    with tab2:
-        with st.form("register_form"):
-            email = st.text_input("Email", key="reg_email")
-            password = st.text_input("Password", type="password", key="reg_pass")
-            role = st.selectbox("Role", ["provider", "payer", "patient"])
-            submitted = st.form_submit_button("Register")
-            
-            if submitted:
-                st.success("Registration successful! Please login.")
-
-def show_admin_dashboard():
-    st.title("Admin Dashboard")
-    
-    tabs = st.tabs(["Apps Management", "User Management", "Analytics"])
+def show_patient_experience():
+    st.title("Patient Portal")
+    tabs = st.tabs(["My Apps", "Browse Apps", "Messages", "Progress"])
     
     with tabs[0]:
-        show_apps_management()
+        show_patient_apps()
     
     with tabs[1]:
-        show_user_management()
+        show_app_directory(for_patient=True)
     
     with tabs[2]:
-        show_analytics()
+        show_messages("patient")
+    
+    with tabs[3]:
+        show_patient_progress()
 
-def show_apps_management():
-    st.header("Digital Therapeutics Management")
+def show_provider_experience():
+    st.title("Provider Portal")
+    tabs = st.tabs(["Patient Management", "Prescribe Apps", "Messages", "Analytics"])
     
-    # Add new app form
-    with st.form("add_app"):
-        st.subheader("Add New App")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            name = st.text_input("App Name")
-            category = st.selectbox("Category", [
-                "Mental Health",
-                "Chronic Disease",
-                "Sleep",
-                "Pain Management"
-            ])
-            developer = st.text_input("Developer")
-        
-        with col2:
-            clinical_score = st.slider("Clinical Evidence Score", 0.0, 5.0, 4.0)
-            fda_status = st.selectbox("FDA Status", [
-                "FDA Cleared",
-                "FDA Registered",
-                "FDA Pending",
-                "Not Applicable"
-            ])
-            price_model = st.selectbox("Price Model", [
-                "Free",
-                "Subscription",
-                "Insurance",
-                "One-time Purchase"
-            ])
-        
-        description = st.text_area("Description")
-        submitted = st.form_submit_button("Add App")
-        
-        if submitted:
-            conn = sqlite3.connect('beacon_health.db')
-            c = conn.cursor()
-            c.execute('''
-                INSERT INTO apps (name, category, description, developer, 
-                                clinical_score, fda_status, price_model)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (name, category, description, developer, 
-                  clinical_score, fda_status, price_model))
-            conn.commit()
-            conn.close()
-            st.success("App added successfully!")
+    with tabs[0]:
+        show_provider_patients()
     
-    # Display existing apps
-    st.subheader("Existing Apps")
+    with tabs[1]:
+        show_app_directory(for_patient=False)
+    
+    with tabs[2]:
+        show_messages("provider")
+    
+    with tabs[3]:
+        show_provider_analytics()
+
+def show_patient_apps():
+    st.header("My Digital Therapeutics")
+    
+    # Prescribed Apps
+    st.subheader("Prescribed Apps")
+    conn = sqlite3.connect('beacon_health.db')
+    prescriptions = pd.read_sql('''
+        SELECT p.*, a.description, a.clinical_score, a.fda_status 
+        FROM prescriptions p 
+        JOIN apps a ON p.app_name = a.name 
+        WHERE prescribed_to = 'Demo Patient'
+    ''', conn)
+    conn.close()
+    
+    for _, app in prescriptions.iterrows():
+        with st.expander(f"{app['app_name']} - Prescribed by {app['prescribed_by']}"):
+            col1, col2 = st.columns([2,1])
+            with col1:
+                st.write(f"**Description:** {app['description']}")
+                st.write(f"**Status:** {app['status']}")
+                st.write(f"**Clinical Score:** {app['clinical_score']}/5.0")
+                st.write(f"**FDA Status:** {app['fda_status']}")
+            with col2:
+                st.button("Launch App", key=f"launch_{app['id']}")
+                st.button("Message Provider", key=f"msg_{app['id']}")
+
+def show_app_directory(for_patient=True):
+    st.header("Digital Therapeutics Directory")
+    
+    # Filters
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        category = st.selectbox("Category", [
+            "All",
+            "Mental Health",
+            "Chronic Disease",
+            "Sleep",
+            "Pain Management",
+            "Heart Health"
+        ])
+    with col2:
+        fda_status = st.selectbox("FDA Status", [
+            "All",
+            "FDA Cleared",
+            "FDA Registered"
+        ])
+    with col3:
+        price_model = st.selectbox("Price Model", [
+            "All",
+            "Free",
+            "Subscription",
+            "Insurance",
+            "Prescription"
+        ])
+    
+    # Display apps
     conn = sqlite3.connect('beacon_health.db')
     apps = pd.read_sql('SELECT * FROM apps', conn)
     conn.close()
     
     for _, app in apps.iterrows():
         with st.expander(f"{app['name']} - {app['category']}"):
-            col1, col2 = st.columns(2)
+            col1, col2 = st.columns([2,1])
             with col1:
                 st.write(f"**Developer:** {app['developer']}")
-                st.write(f"**FDA Status:** {app['fda_status']}")
-            with col2:
+                st.write(f"**Description:** {app['description']}")
                 st.write(f"**Clinical Score:** {app['clinical_score']}/5.0")
+                st.write(f"**FDA Status:** {app['fda_status']}")
                 st.write(f"**Price Model:** {app['price_model']}")
-            st.write(f"**Description:** {app['description']}")
+            with col2:
+                if for_patient:
+                    if st.button("Request Access", key=f"request_{app['id']}"):
+                        st.success("Request sent to your healthcare provider")
+                else:
+                    if st.button("Prescribe", key=f"prescribe_{app['id']}"):
+                        st.success(f"Prescribed {app['name']}")
+
+def show_messages(role):
+    st.header("Message Center")
+    
+    # New Message Form
+    with st.expander("New Message"):
+        with st.form("new_message"):
+            subject = st.text_input("Subject")
+            message = st.text_area("Message")
+            app = st.selectbox("Related App", ["None"] + list(pd.read_sql(
+                'SELECT name FROM apps', sqlite3.connect('beacon_health.db')
+            )['name']))
+            
+            if st.form_submit_button("Send Message"):
+                conn = sqlite3.connect('beacon_health.db')
+                c = conn.cursor()
+                c.execute('''
+                    INSERT INTO messages (sender_role, recipient_role, subject, message, app_name)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (role, 'provider' if role == 'patient' else 'patient', subject, message, app))
+                conn.commit()
+                conn.close()
+                st.success("Message sent!")
+    
+    # Message History
+    st.subheader("Message History")
+    conn = sqlite3.connect('beacon_health.db')
+    messages = pd.read_sql(
+        f"SELECT * FROM messages WHERE sender_role = ? OR recipient_role = ? ORDER BY created_at DESC",
+        conn,
+        params=(role, role)
+    )
+    conn.close()
+    
+    for _, msg in messages.iterrows():
+        with st.expander(f"{msg['subject']} - {msg['created_at']}"):
+            st.write(f"**From:** {msg['sender_role'].capitalize()}")
+            st.write(f"**To:** {msg['recipient_role'].capitalize()}")
+            if msg['app_name'] != 'None':
+                st.write(f"**Related App:** {msg['app_name']}")
+            st.write(f"**Message:** {msg['message']}")
+            
+            # Reply button
+            if st.button("Reply", key=f"reply_{msg['id']}"):
+                st.session_state.replying_to = msg['id']
+
+def show_patient_progress():
+    st.header("My Progress")
+    
+    # Demo progress data
+    progress_data = pd.DataFrame({
+        'Week': ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+        'Engagement': [85, 92, 88, 95],
+        'Wellness Score': [75, 80, 85, 88]
+    })
+    
+    st.line_chart(progress_data.set_index('Week'))
+    
+    # Progress notes
+    st.subheader("Progress Notes")
+    with st.expander("Week 4 Summary"):
+        st.write("""
+        - Completed all recommended meditation sessions
+        - Sleep quality improved by 25%
+        - Stress levels decreased
+        - Medication adherence at 95%
+        """)
+
+def show_provider_patients():
+    st.header("Patient Management")
+    
+    # Demo patient list
+    patients = pd.DataFrame({
+        'Name': ['John Smith', 'Sarah Johnson', 'Michael Chen'],
+        'Active Apps': [2, 1, 3],
+        'Engagement': ['High', 'Medium', 'High'],
+        'Last Check-in': ['2 days ago', '1 week ago', '3 days ago']
+    })
+    
+    for _, patient in patients.iterrows():
+        with st.expander(f"{patient['Name']}"):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write(f"**Active Apps:** {patient['Active Apps']}")
+                st.write(f"**Engagement:** {patient['Engagement']}")
+                st.write(f"**Last Check-in:** {patient['Last Check-in']}")
+            with col2:
+                st.button("View Details", key=f"details_{patient['Name']}")
+                st.button("Send Message", key=f"message_{patient['Name']}")
+                st.button("Prescribe App", key=f"prescribe_to_{patient['Name']}")
+
+def show_provider_analytics():
+    st.header("Provider Analytics")
+    
+    # Demo metrics
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Active Patients", "15")
+        st.metric("Total Prescriptions", "28")
+    with col2:
+        st.metric("Avg. Engagement", "87%")
+        st.metric("Patient Messages", "12")
+    with col3:
+        st.metric("Positive Outcomes", "92%")
+        st.metric("Pending Reviews", "3")
+
+def show_admin_experience():
+    st.title("Admin Portal")
+    tabs = st.tabs(["App Management", "User Management", "System Analytics"])
+    
+    with tabs[0]:
+        show_app_management()
+    
+    with tabs[1]:
+        show_user_management()
+    
+    with tabs[2]:
+        show_system_analytics()
+
+def show_app_management():
+    st.header("Digital Therapeutics Management")
+    
+    # Add new app form
+    with st.form("add_app"):
+        st.subheader("Add New App")
+        name = st.text_input("App Name")
+        category = st.selectbox("Category", [
+            "Mental Health",
+            "Chronic Disease",
+            "Sleep",
+            "Pain Management",
+            "Heart Health"
+        ])
+        description = st.text_area("Description")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            clinical_score = st.slider("Clinical Score", 0.0, 5.0, 4.0)
+            fda_status = st.selectbox("FDA Status", ["FDA Cleared", "FDA Registered"])
+        with col2:
+            developer = st.text_input("Developer")
+            price_model = st.selectbox("Price Model", ["Free", "Subscription", "Insurance", "Prescription"])
+        
+        if st.form_submit_button("Add App"):
+            conn = sqlite3.connect('beacon_health.db')
+            c = conn.cursor()
+            c.execute('''
+                INSERT INTO apps (name, category, description, developer, clinical_score, fda_status, price_model)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (name, category, description, developer, clinical_score, fda_status, price_model))
+            conn.commit()
+            conn.close()
+            st.success("App added successfully!")
 
 def show_user_management():
     st.header("User Management")
     
     # Demo user data
     users = pd.DataFrame({
-        'Name': ['John Smith', 'Sarah Johnson', 'Michael Chen'],
-        'Role': ['Provider', 'Patient', 'Provider'],
-        'Status': ['Active', 'Active', 'Pending'],
-        'Join Date': ['2024-01-15', '2024-02-01', '2024-02-10']
+        'Name': ['Dr. Smith', 'Dr. Johnson', 'John Doe', 'Sarah Smith'],
+        'Role': ['Provider', 'Provider', 'Patient', 'Patient'],
+        'Status': ['Active', 'Active', 'Active', 'Active'],
+        'Apps Used': ['-', '-', '2', '3'],
+        'Last Login': ['2 days ago', '1 day ago', '12 hours ago', '3 days ago']
     })
     
-    st.dataframe(users)
+    # Display users in expandable sections
+    for _, user in users.iterrows():
+        with st.expander(f"{user['Name']} - {user['Role']}"):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write(f"**Status:** {user['Status']}")
+                st.write(f"**Last Login:** {user['Last Login']}")
+                if user['Role'] == 'Patient':
+                    st.write(f"**Active Apps:** {user['Apps Used']}")
+            with col2:
+                st.button("Edit Access", key=f"edit_{user['Name']}")
+                st.button("View Activity", key=f"activity_{user['Name']}")
 
-def show_analytics():
-    st.header("Platform Analytics")
+def show_system_analytics():
+    st.header("System Analytics")
     
-    # Demo metrics
+    # Overview metrics
     col1, col2, col3 = st.columns(3)
+    
     with col1:
-        st.metric("Total Apps", "6")
-        st.metric("Active Users", "124")
+        st.metric("Total Users", "156")
+        st.metric("Active Providers", "45")
     with col2:
-        st.metric("Providers", "45")
-        st.metric("Patients", "79")
+        st.metric("Active Patients", "111")
+        st.metric("Total Apps", "24")
     with col3:
-        st.metric("Avg Clinical Score", "4.7")
-        st.metric("FDA Cleared Apps", "4")
-
-def show_provider_dashboard():
-    st.title("Provider Dashboard")
+        st.metric("Messages Today", "34")
+        st.metric("New Prescriptions", "12")
     
-    tabs = st.tabs(["My Patients", "Prescribe Apps", "Monitor Progress"])
+    # Usage statistics
+    st.subheader("Platform Usage")
+    usage_data = pd.DataFrame({
+        'Date': pd.date_range(start='2024-01-01', periods=7),
+        'Active Users': [120, 125, 130, 128, 135, 140, 156],
+        'Messages': [25, 28, 30, 27, 32, 35, 34],
+        'Prescriptions': [8, 10, 9, 11, 10, 13, 12]
+    })
     
-    with tabs[0]:
-        st.header("My Patients")
-        patients = pd.DataFrame({
-            'Name': ['John Smith', 'Sarah Johnson'],
-            'Age': [45, 32],
-            'Condition': ['Diabetes', 'Anxiety'],
-            'Active Apps': [2, 1]
-        })
-        st.dataframe(patients)
+    tab1, tab2 = st.tabs(["User Activity", "App Usage"])
     
-    with tabs[1]:
-        st.header("Prescribe Digital Therapeutics")
-        conn = sqlite3.connect('beacon_health.db')
-        apps = pd.read_sql('SELECT * FROM apps', conn)
-        conn.close()
-        
-        patient = st.selectbox("Select Patient", ["John Smith", "Sarah Johnson"])
-        condition = st.selectbox("Condition", ["Anxiety", "Depression", "Diabetes", "Insomnia"])
-        
-        st.subheader("Recommended Apps")
-        for _, app in apps.iterrows():
-            with st.expander(f"{app['name']} - {app['category']}"):
-                st.write(f"**Clinical Score:** {app['clinical_score']}/5.0")
-                st.write(f"**Description:** {app['description']}")
-                if st.button("Prescribe", key=f"prescribe_{app['id']}"):
-                    st.success(f"Prescribed {app['name']} to {patient}")
-
-def show_patient_dashboard():
-    st.title("Patient Dashboard")
+    with tab1:
+        st.line_chart(usage_data.set_index('Date')[['Active Users']])
     
-    tabs = st.tabs(["My Apps", "Progress", "Find Apps"])
+    with tab2:
+        st.line_chart(usage_data.set_index('Date')[['Messages', 'Prescriptions']])
     
-    with tabs[0]:
-        st.header("My Digital Therapeutics")
-        with st.container():
-            st.subheader("DiabetesGuard")
-            st.write("Prescribed by: Dr. Smith")
-            st.write("Status: Active")
-            st.button("Launch App", key="launch_diabetes")
+    # App performance
+    st.subheader("App Performance")
+    conn = sqlite3.connect('beacon_health.db')
+    apps = pd.read_sql('SELECT name, clinical_score, category FROM apps', conn)
+    conn.close()
     
-    with tabs[1]:
-        st.header("My Progress")
-        st.line_chart(pd.DataFrame({
-            'Glucose Levels': [120, 118, 115, 112, 110],
-            'Target': [110, 110, 110, 110, 110]
-        }))
-    
-    with tabs[2]:
-        st.header("Explore Apps")
-        conn = sqlite3.connect('beacon_health.db')
-        apps = pd.read_sql('SELECT * FROM apps', conn)
-        conn.close()
-        
-        for _, app in apps.iterrows():
-            with st.expander(f"{app['name']} - {app['category']}"):
-                st.write(f"**Clinical Score:** {app['clinical_score']}/5.0")
-                st.write(f"**Description:** {app['description']}")
-                st.write(f"**FDA Status:** {app['fda_status']}")
+    st.bar_chart(apps.set_index('name')['clinical_score'])
 
 if __name__ == "__main__":
     main()
